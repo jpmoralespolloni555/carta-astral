@@ -1,10 +1,14 @@
 import datetime
 import math
-import ephem
 import streamlit as st
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 import pytz
+
+from flatlib.datetime import Datetime
+from flatlib.geopos import GeoPos
+from flatlib.chart import Chart
+from flatlib import const
 
 ZODIAC_SIGNS = [
     "Aries", "Tauro", "Géminis", "Cáncer", "Leo", "Virgo",
@@ -76,70 +80,54 @@ NUMEROLOGY_MEANINGS = {
     22: "Construcción a gran escala, materialización de visiones y maestría práctica."
 }
 
-# --- CÁLCULOS ASTRONÓMICOS ---
+# --- CÁLCULOS ASTROLÓGICOS CON FLATLIB ---
 
-def get_zodiac_position_from_deg(raw_deg):
-    raw_deg = raw_deg % 360
-    sign_num = int(raw_deg // 30)
-    deg_in_sign = raw_deg % 30
+def get_flatlib_chart(dt_utc, lat, lon):
+    date_str = dt_utc.strftime('%Y/%m/%d')
+    time_str = dt_utc.strftime('%H:%M:%S')
+    
+    pos_lat = f"{abs(lat):.2f}"
+    dir_lat = 'n' if lat >= 0 else 's'
+    pos_lon = f"{abs(lon):.2f}"
+    dir_lon = 'e' if lon >= 0 else 'w'
+    
+    flat_date = Datetime(date_str, time_str, '+00:00')
+    flat_pos = GeoPos(f"{pos_lat}{dir_lat}", f"{pos_lon}{dir_lon}")
+    
+    return Chart(flat_date, flat_pos, hsys=const.HOUSES_PLACIDUS)
+
+def parse_obj(obj):
     return {
-        "sign": ZODIAC_SIGNS[sign_num],
-        "degree": int(deg_in_sign),
-        "minute": int((deg_in_sign - int(deg_in_sign)) * 60),
-        "raw_deg": raw_deg
+        "sign": obj.sign,
+        "degree": int(obj.signlon),
+        "minute": int((obj.signlon - int(obj.signlon)) * 60),
+        "raw_deg": obj.lon
     }
 
-def get_zodiac_position(equatorial_body):
-    ecl = ephem.Ecliptic(equatorial_body)
-    raw_deg = math.degrees(ecl.lon) % 360
-    return get_zodiac_position_from_deg(raw_deg)
-
-def calculate_exact_ascendant(dt_utc, lat, lon):
-    """Cálculo trigonométrico exacto del Ascendente usando la oblicuidad real de la fecha."""
-    observer = ephem.Observer()
-    observer.date = dt_utc
-    observer.lat = math.radians(lat)
-    observer.lon = math.radians(lon)
-    
-    # Tiempo Sideral Local (LST) en radianes
-    lst = float(observer.sidereal_time())
-    
-    # Oblicuidad verdadera de la eclíptica (IAU)
-    julian_days = float(ephem.julian_date(dt_utc)) - 2451545.0
-    eps_deg = 23.4392911 - (0.0000004 * julian_days)
-    eps = math.radians(eps_deg)
-    
-    # Fórmula trigonométrica para la intersección de la eclíptica con el horizonte este
-    y = -math.cos(lst)
-    x = math.sin(lst) * math.cos(eps) + math.tan(observer.lat) * math.sin(eps)
-    
-    asc_deg = math.degrees(math.atan2(y, x)) % 360
-    return get_zodiac_position_from_deg(asc_deg)
-
 def calculate_chart(dt_utc, lat, lon):
-    observer = ephem.Observer()
-    observer.date = dt_utc
-    observer.lat = str(lat)
-    observer.lon = str(lon)
+    chart = get_flatlib_chart(dt_utc, lat, lon)
     
-    bodies = {
-        "Sol": ephem.Sun(observer),
-        "Luna": ephem.Moon(observer),
-        "Mercurio": ephem.Mercury(observer),
-        "Venus": ephem.Venus(observer),
-        "Marte": ephem.Mars(observer),
-        "Júpiter": ephem.Jupiter(observer),
-        "Saturno": ephem.Saturn(observer),
-        "Urano": ephem.Uranus(observer),
-        "Neptuno": ephem.Neptune(observer),
-        "Plutón": ephem.Pluto(observer)
+    mapping = {
+        "Sol": const.SUN,
+        "Luna": const.MOON,
+        "Mercurio": const.MERCURY,
+        "Venus": const.VENUS,
+        "Marte": const.MARS,
+        "Júpiter": const.JUPITER,
+        "Saturno": const.SATURN,
+        "Urano": const.URANUS,
+        "Neptuno": const.NEPTUNE,
+        "Plutón": const.PLUTO
     }
     
     positions = {}
-    for name, body in bodies.items():
-        positions[name] = get_zodiac_position(body)
+    for name, const_id in mapping.items():
+        obj = chart.get(const_id)
+        positions[name] = parse_obj(obj)
         
-    positions["Ascendente"] = calculate_exact_ascendant(dt_utc, lat, lon)
+    asc_obj = chart.get(const.ASC)
+    positions["Ascendente"] = parse_obj(asc_obj)
+    
     return positions
 
 def get_element(sign_name):
@@ -178,8 +166,10 @@ def generate_daily_synthesis(natal, transits, aspects, life_path, personal_day):
     tension_count = sum(1 for a in aspects if a["type"] == "Tensión")
     harmonic_count = sum(1 for a in aspects if a["type"] == "Armónico")
     
+    desc = ASCENDANT_DESCRIPTIONS.get(asc_sign, "Proyectas una energía única frente a la vida.")
+    
     text = f"""
-    * **Integración Astrológica:** Con tu **Ascendente natal en {asc_sign}**, abordas las experiencias mediante {ASCENDANT_DESCRIPTIONS[asc_sign].lower()} El tránsito actual del **Sol en {sun_transit}** y la **Luna en {moon_transit}** inclina la atmósfera general hacia este terreno temático.
+    * **Integración Astrológica:** Con tu **Ascendente natal en {asc_sign}**, abordas las experiencias mediante {desc.lower()} El tránsito actual del **Sol en {sun_transit}** y la **Luna en {moon_transit}** inclina la atmósfera general hacia este terreno temático.
     * **Dinamismo de Aspectos:** En el mapa de hoy destacan **{harmonic_count} aspectos armónicos** y **{tension_count} de tensión** activos sobre tus posiciones natales.
     * **Conexión Numerológica:** Tu **Camino de Vida natal ({life_path})** sintoniza hoy con la energía del **Día Personal {personal_day}**, caracterizado por: _{NUMEROLOGY_MEANINGS.get(personal_day, '')}_
     """
@@ -225,9 +215,8 @@ birth_date = st.sidebar.date_input("Fecha de nacimiento", datetime.date(1992, 5,
 birth_time = st.sidebar.time_input("Hora exacta de nacimiento", datetime.time(14, 30))
 city_name = st.sidebar.text_input("Ciudad y País de Nacimiento", "Santiago, Chile")
 
-# Resolución de Zona Horaria Local para la Hora Actual de Consulta
 tf = TimezoneFinder()
-geolocator = Nominatim(user_agent="astro_num_app_tz_v3")
+geolocator = Nominatim(user_agent="astro_flatlib_app")
 loc_default = geolocator.geocode(city_name)
 
 if loc_default:
@@ -263,7 +252,7 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         
         st.success(f"Ubicación: **{location.address}** | Huso Horario Local: **{tz_str} (UTC{utc_query.strftime('%z')})**")
         
-        # --- SECCIÓN 1: VÍNCULO ASTROLOGÍA + NUMEROLOGÍA + GUÍA DEL DÍA ---
+        # --- SECCIÓN 1: ASTROLOGÍA + NUMEROLOGÍA ---
         st.subheader("📜 Sincronía del Día: Astrología & Numerología")
         
         col_num1, col_num2 = st.columns(2)
@@ -277,7 +266,7 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         
         st.markdown("---")
         
-        # --- SECCIÓN 2: PALETA DE COLORIMETRÍA ---
+        # --- SECCIÓN 2: COLORIMETRÍA ---
         st.subheader("🎨 Recomendación Energetizada de Color")
         c1, c2, c3 = st.columns(3)
         c1.info(f"**Principal:** {rec['main_color']}")
@@ -289,7 +278,7 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         # --- SECCIÓN 3: ASCENDENTE Y CARTA NATAL vs TRÁNSITOS ---
         asc_info = natal_chart["Ascendente"]
         st.subheader(f"✨ Ascendente Natal: {asc_info['sign']} a {asc_info['degree']}° {asc_info['minute']}'")
-        st.write(ASCENDANT_DESCRIPTIONS[asc_info["sign"]])
+        st.write(ASCENDANT_DESCRIPTIONS.get(asc_info["sign"], ""))
         
         col_nat, col_tra = st.columns(2)
         with col_nat:
