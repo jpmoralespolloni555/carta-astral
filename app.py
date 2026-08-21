@@ -5,10 +5,7 @@ from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 import pytz
 
-from flatlib.datetime import Datetime
-from flatlib.geopos import GeoPos
-from flatlib.chart import Chart
-from flatlib import const
+from kerykeion import AstrologicalSubject, KerykeionChartSVG
 
 ZODIAC_SIGNS = [
     "Aries", "Tauro", "Géminis", "Cáncer", "Leo", "Virgo",
@@ -50,7 +47,7 @@ PLANET_COLORS = {
     "Plutón": "Tinto, Borgoña o Negro"
 }
 
-# --- CÁLCULOS NUMEROLÓGICOS ---
+# --- NUMEROLOGÍA ---
 
 def reduce_number(n):
     while n > 9 and n not in [11, 22]:
@@ -80,53 +77,50 @@ NUMEROLOGY_MEANINGS = {
     22: "Construcción a gran escala, materialización de visiones y maestría práctica."
 }
 
-# --- CÁLCULOS ASTROLÓGICOS CON FLATLIB ---
+# --- CÁLCULOS CON KERYKEION ---
 
-def get_flatlib_chart(dt_utc, lat, lon):
-    date_str = dt_utc.strftime('%Y/%m/%d')
-    time_str = dt_utc.strftime('%H:%M:%S')
+def get_kery_data(name, dt, lat, lon, tz_str):
+    subject = AstrologicalSubject(
+        name=name,
+        year=dt.year,
+        month=dt.month,
+        day=dt.day,
+        hour=dt.hour,
+        minute=dt.minute,
+        lng=lon,
+        lat=lat,
+        tz_str=tz_str
+    )
     
-    pos_lat = f"{abs(lat):.2f}"
-    dir_lat = 'n' if lat >= 0 else 's'
-    pos_lon = f"{abs(lon):.2f}"
-    dir_lon = 'e' if lon >= 0 else 'w'
-    
-    flat_date = Datetime(date_str, time_str, '+00:00')
-    flat_pos = GeoPos(f"{pos_lat}{dir_lat}", f"{pos_lon}{dir_lon}")
-    
-    return Chart(flat_date, flat_pos, hsys=const.HOUSES_PLACIDUS)
-
-def parse_obj(obj):
-    return {
-        "sign": obj.sign,
-        "degree": int(obj.signlon),
-        "minute": int((obj.signlon - int(obj.signlon)) * 60),
-        "raw_deg": obj.lon
-    }
-
-def calculate_chart(dt_utc, lat, lon):
-    chart = get_flatlib_chart(dt_utc, lat, lon)
-    
-    mapping = {
-        "Sol": const.SUN,
-        "Luna": const.MOON,
-        "Mercurio": const.MERCURY,
-        "Venus": const.VENUS,
-        "Marte": const.MARS,
-        "Júpiter": const.JUPITER,
-        "Saturno": const.SATURN,
-        "Urano": const.URANUS,
-        "Neptuno": const.NEPTUNE,
-        "Plutón": const.PLUTO
+    planets_map = {
+        "Sol": subject.sun,
+        "Luna": subject.moon,
+        "Mercurio": subject.mercury,
+        "Venus": subject.venus,
+        "Marte": subject.mars,
+        "Júpiter": subject.jupiter,
+        "Saturno": subject.saturn,
+        "Urano": subject.uranus,
+        "Neptuno": subject.neptune,
+        "Plutón": subject.pluto
     }
     
     positions = {}
-    for name, const_id in mapping.items():
-        obj = chart.get(const_id)
-        positions[name] = parse_obj(obj)
+    for p_name, p_obj in planets_map.items():
+        positions[p_name] = {
+            "sign": p_obj["sign"],
+            "degree": int(p_obj["position"]),
+            "minute": int((p_obj["position"] - int(p_obj["position"])) * 60),
+            "raw_deg": p_obj["abs_pos"]
+        }
         
-    asc_obj = chart.get(const.ASC)
-    positions["Ascendente"] = parse_obj(asc_obj)
+    asc_obj = subject.first_house
+    positions["Ascendente"] = {
+        "sign": asc_obj["sign"],
+        "degree": int(asc_obj["position"]),
+        "minute": int((asc_obj["position"] - int(asc_obj["position"])) * 60),
+        "raw_deg": asc_obj["abs_pos"]
+    }
     
     return positions
 
@@ -216,7 +210,7 @@ birth_time = st.sidebar.time_input("Hora exacta de nacimiento", datetime.time(14
 city_name = st.sidebar.text_input("Ciudad y País de Nacimiento", "Santiago, Chile")
 
 tf = TimezoneFinder()
-geolocator = Nominatim(user_agent="astro_flatlib_app")
+geolocator = Nominatim(user_agent="astro_kery_app")
 loc_default = geolocator.geocode(city_name)
 
 if loc_default:
@@ -237,20 +231,20 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         tz_str = tf.timezone_at(lat=lat, lng=lon)
         local_tz = pytz.timezone(tz_str)
         
-        utc_birth = local_tz.localize(datetime.datetime.combine(birth_date, birth_time)).astimezone(pytz.utc)
-        utc_query = local_tz.localize(datetime.datetime.combine(query_date, query_time)).astimezone(pytz.utc)
+        dt_birth = datetime.datetime.combine(birth_date, birth_time)
+        dt_query = datetime.datetime.combine(query_date, query_time)
         
-        natal_chart = calculate_chart(utc_birth, lat, lon)
-        transit_chart = calculate_chart(utc_query, lat, lon)
+        natal_chart = get_kery_data("Natal", dt_birth, lat, lon, tz_str)
+        transit_chart = get_kery_data("Tránsito", dt_query, lat, lon, tz_str)
+        
         aspects = calculate_aspects(natal_chart, transit_chart)
-        
         life_path = calculate_life_path(birth_date)
         personal_day = calculate_personal_day(birth_date, query_date)
         
         synthesis_text, guidance_text = generate_daily_synthesis(natal_chart, transit_chart, aspects, life_path, personal_day)
         rec = calculate_color_recommendation(natal_chart, transit_chart, aspects)
         
-        st.success(f"Ubicación: **{location.address}** | Huso Horario Local: **{tz_str} (UTC{utc_query.strftime('%z')})**")
+        st.success(f"Ubicación: **{location.address}** | Huso Horario Local: **{tz_str}**")
         
         # --- SECCIÓN 1: ASTROLOGÍA + NUMEROLOGÍA ---
         st.subheader("📜 Sincronía del Día: Astrología & Numerología")
