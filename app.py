@@ -76,7 +76,7 @@ NUMEROLOGY_MEANINGS = {
     22: "Construcción a gran escala, materialización de visiones y maestría práctica."
 }
 
-# --- CÁLCULOS ASTRONÓMICOS (EPHEM) ---
+# --- CÁLCULOS ASTRONÓMICOS ---
 
 def get_zodiac_position_from_deg(raw_deg):
     raw_deg = raw_deg % 360
@@ -95,7 +95,10 @@ def get_zodiac_position(equatorial_body):
     return get_zodiac_position_from_deg(raw_deg)
 
 def calculate_correct_ascendant(dt_utc, lat, lon):
-    """Cálculo trigonométrico corregido del Ascendente astronómico oriental."""
+    """
+    Fórmula astronómica estándar de la IAU para el Ascendente:
+    tan(Asc) = cos(LST) / (-sin(LST)*cos(eps) - tan(lat)*sin(eps))
+    """
     observer = ephem.Observer()
     observer.date = dt_utc
     observer.lat = math.radians(lat)
@@ -107,11 +110,12 @@ def calculate_correct_ascendant(dt_utc, lat, lon):
     eps_deg = 23.4392911 - (0.0000004 * julian_days)
     eps = math.radians(eps_deg)
     
-    # Trigonometría esférica para la cúspide oriental
     y = math.cos(lst)
-    x = -math.sin(lst) * math.cos(eps) - math.tan(observer.lat) * math.sin(eps)
+    x = -(math.sin(lst) * math.cos(eps) + math.tan(observer.lat) * math.sin(eps))
     
-    asc_deg = (math.degrees(math.atan2(y, x)) + 180) % 360
+    asc_rad = math.atan2(y, x)
+    asc_deg = math.degrees(asc_rad) % 360
+    
     return get_zodiac_position_from_deg(asc_deg)
 
 def calculate_chart(dt_utc, lat, lon):
@@ -226,7 +230,7 @@ birth_time = st.sidebar.time_input("Hora exacta de nacimiento", datetime.time(14
 city_name = st.sidebar.text_input("Ciudad y País de Nacimiento", "Santiago, Chile")
 
 tf = TimezoneFinder()
-geolocator = Nominatim(user_agent="astro_ephem_app_v4")
+geolocator = Nominatim(user_agent="astro_ephem_app_v5")
 loc_default = geolocator.geocode(city_name)
 
 if loc_default:
