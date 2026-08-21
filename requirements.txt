@@ -1,5 +1,5 @@
 streamlit
-flatlib
+kerykeion
 geopy
 timezonefinder
 pytz
