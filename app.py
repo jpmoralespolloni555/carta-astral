@@ -31,9 +31,9 @@ PLANET_COLORS = {
     "Plutón": "Tinto, Borgoña o Negro"
 }
 
-def get_zodiac_position(equatorial_coord):
-    """Convierte coordenadas astronómicas a grados eclípticos en el Zodíaco."""
-    ecl = ephem.Ecliptic(equatorial_coord)
+def get_zodiac_position(equatorial_body):
+    """Convierte las coordenadas del cuerpo a longitud eclíptica."""
+    ecl = ephem.Ecliptic(equatorial_body)
     raw_deg = math.degrees(ecl.lon) % 360
     sign_num = int(raw_deg // 30)
     deg_in_sign = raw_deg % 30
@@ -44,27 +44,8 @@ def get_zodiac_position(equatorial_coord):
         "raw_deg": raw_deg
     }
 
-def calculate_ascendant(dt_utc, lat, lon):
-    """Calcula el Ascendente a partir del Tiempo Sideral Local y Oblicuidad."""
-    observer = ephem.Observer()
-    observer.date = dt_utc
-    observer.lat = math.radians(lat)
-    observer.lon = math.radians(lon)
-    
-    lst = math.degrees(observer.sidereal_time())
-    eps = math.degrees(ephem.Ecliptic(ephem.Equatorial('0', '0', epoch=observer.date)).ecl)
-    
-    lst_rad = math.radians(lst)
-    lat_rad = math.radians(lat)
-    eps_rad = math.radians(eps)
-    
-    y = -math.cos(lst_rad)
-    x = math.sin(lst_rad) * math.cos(eps_rad) + math.tan(lat_rad) * math.sin(eps_rad)
-    asc_deg = math.degrees(math.atan2(y, x)) % 360
-    
-    return get_zodiac_position_from_deg(asc_deg)
-
 def get_zodiac_position_from_deg(raw_deg):
+    raw_deg = raw_deg % 300 if raw_deg >= 360 else raw_deg % 360
     sign_num = int(raw_deg // 30)
     deg_in_sign = raw_deg % 30
     return {
@@ -73,6 +54,27 @@ def get_zodiac_position_from_deg(raw_deg):
         "minute": int((deg_in_sign - int(deg_in_sign)) * 60),
         "raw_deg": raw_deg
     }
+
+def calculate_ascendant(dt_utc, lat, lon):
+    """Calcula el Ascendente mediante Tiempo Sideral Local u Oblicuidad promedio (23.44°)."""
+    observer = ephem.Observer()
+    observer.date = dt_utc
+    observer.lat = math.radians(lat)
+    observer.lon = math.radians(lon)
+    
+    # Tiempo Sideral Local en grados
+    lst_deg = math.degrees(observer.sidereal_time())
+    eps_deg = 23.4392911  # Oblicuidad media de la eclíptica
+    
+    lst_rad = math.radians(lst_deg)
+    lat_rad = math.radians(lat)
+    eps_rad = math.radians(eps_deg)
+    
+    y = -math.cos(lst_rad)
+    x = math.sin(lst_rad) * math.cos(eps_rad) + math.tan(lat_rad) * math.sin(eps_rad)
+    asc_deg = math.degrees(math.atan2(y, x)) % 360
+    
+    return get_zodiac_position_from_deg(asc_deg)
 
 def calculate_chart(dt_utc, lat, lon):
     observer = ephem.Observer()
@@ -169,7 +171,7 @@ query_date = st.sidebar.date_input("Fecha de Consulta", datetime.date.today())
 query_time = st.sidebar.time_input("Hora de Consulta", datetime.datetime.now().time())
 
 if st.sidebar.button("Calcular Carta y Tránsitos"):
-    geolocator = Nominatim(user_agent="astro_app_cloud_ephem")
+    geolocator = Nominatim(user_agent="astro_app_cloud_ephem_v2")
     location = geolocator.geocode(city_name)
     if location:
         lat, lon = location.latitude, location.longitude
