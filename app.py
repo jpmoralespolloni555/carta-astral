@@ -23,7 +23,7 @@ ASCENDANT_DESCRIPTIONS = {
     "Sagitario": "Tu actitud vital es expansiva, optimista y orientada a la búsqueda de sentido, horizontes amplios y aprendizaje.",
     "Capricornio": "Proyectas estructura, pragmatismo y disciplina. Abordas tus metas con sobriedad y foco en la maestría a largo plazo.",
     "Acuario": "Tu visión es original, independiente y enfocada en la innovación. Aportas una perspectiva diferenciada a lo colectivo.",
-    "Piscis": "Proyectas sensibilidad, empatía y apertura symbolic. Tu conexión con el entorno se da a través de la percepción sutil."
+    "Piscis": "Proyectas sensibilidad, empatía y apertura simbólica. Tu conexión con el entorno se da a través de la percepción sutil."
 }
 
 ELEMENT_COLORS = {
@@ -76,7 +76,7 @@ NUMEROLOGY_MEANINGS = {
     22: "Construcción a gran escala, materialización de visiones y maestría práctica."
 }
 
-# --- CÁLCULOS ASTRONÓMICOS DE PRECISIÓN ---
+# --- CÁLCULOS ASTRONÓMICOS ---
 
 def get_zodiac_position_from_deg(raw_deg):
     raw_deg = raw_deg % 360
@@ -95,26 +95,25 @@ def get_zodiac_position(equatorial_body):
     return get_zodiac_position_from_deg(raw_deg)
 
 def calculate_exact_ascendant(dt_utc, lat, lon):
-    """Cálculo riguroso del Ascendente astronómico en coordenadas ecuatoriales/eclípticas."""
+    """Cálculo trigonométrico exacto del Ascendente usando la oblicuidad real de la fecha."""
     observer = ephem.Observer()
     observer.date = dt_utc
     observer.lat = math.radians(lat)
     observer.lon = math.radians(lon)
     
-    # Tiempo Sideral Local
-    lst = observer.sidereal_time()
+    # Tiempo Sideral Local (LST) en radianes
+    lst = float(observer.sidereal_time())
     
-    # Oblicuidad real de la eclíptica para la época actual
-    ecl = ephem.Ecliptic(ephem.Equatorial('0', '0', epoch=observer.date))
-    eps = ecl.ecl
+    # Oblicuidad verdadera de la eclíptica (IAU)
+    julian_days = float(ephem.julian_date(dt_utc)) - 2451545.0
+    eps_deg = 23.4392911 - (0.0000004 * julian_days)
+    eps = math.radians(eps_deg)
     
-    # Trigonometría esférica para la intersección de la eclíptica con el horizonte este
+    # Fórmula trigonométrica para la intersección de la eclíptica con el horizonte este
     y = -math.cos(lst)
     x = math.sin(lst) * math.cos(eps) + math.tan(observer.lat) * math.sin(eps)
     
-    asc_rad = math.atan2(y, x)
-    asc_deg = math.degrees(asc_rad) % 360
-    
+    asc_deg = math.degrees(math.atan2(y, x)) % 360
     return get_zodiac_position_from_deg(asc_deg)
 
 def calculate_chart(dt_utc, lat, lon):
@@ -228,7 +227,7 @@ city_name = st.sidebar.text_input("Ciudad y País de Nacimiento", "Santiago, Chi
 
 # Resolución de Zona Horaria Local para la Hora Actual de Consulta
 tf = TimezoneFinder()
-geolocator = Nominatim(user_agent="astro_num_app_tz")
+geolocator = Nominatim(user_agent="astro_num_app_tz_v3")
 loc_default = geolocator.geocode(city_name)
 
 if loc_default:
