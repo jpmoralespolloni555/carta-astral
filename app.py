@@ -1,31 +1,15 @@
 import datetime
 import math
-import swisseph as swe
+import ephem
 import streamlit as st
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 import pytz
 
-# Configuración inicial de Swiss Ephemeris
-swe.set_ephe_path('')
-
 ZODIAC_SIGNS = [
     "Aries", "Tauro", "Géminis", "Cáncer", "Leo", "Virgo",
     "Libra", "Escorpio", "Sagitario", "Capricornio", "Acuario", "Piscis"
 ]
-
-PLANETS = {
-    swe.SUN: "Sol",
-    swe.MOON: "Luna",
-    swe.MERCURY: "Mercurio",
-    swe.VENUS: "Venus",
-    swe.MARS: "Marte",
-    swe.JUPITER: "Júpiter",
-    swe.SATURN: "Saturno",
-    swe.URANUS: "Urano",
-    swe.NEPTUNE: "Neptuno",
-    swe.PLUTO: "Plutón"
-}
 
 ELEMENT_COLORS = {
     "Fuego": {"main": "Rojo vibrante o Naranja", "avoid": "Azul oscuro o Gris apagado"},
@@ -47,28 +31,73 @@ PLANET_COLORS = {
     "Plutón": "Tinto, Borgoña o Negro"
 }
 
-def get_julian_day(dt_utc):
-    return swe.julday(dt_utc.year, dt_utc.month, dt_utc.day, dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0)
-
-def get_zodiac_position(longitude):
-    sign_num = int(longitude // 30)
-    deg_in_sign = longitude % 30
+def get_zodiac_position(equatorial_coord):
+    """Convierte coordenadas astronómicas a grados eclípticos en el Zodíaco."""
+    ecl = ephem.Ecliptic(equatorial_coord)
+    raw_deg = math.degrees(ecl.lon) % 360
+    sign_num = int(raw_deg // 30)
+    deg_in_sign = raw_deg % 30
     return {
         "sign": ZODIAC_SIGNS[sign_num],
         "degree": int(deg_in_sign),
         "minute": int((deg_in_sign - int(deg_in_sign)) * 60),
-        "raw_deg": longitude
+        "raw_deg": raw_deg
+    }
+
+def calculate_ascendant(dt_utc, lat, lon):
+    """Calcula el Ascendente a partir del Tiempo Sideral Local y Oblicuidad."""
+    observer = ephem.Observer()
+    observer.date = dt_utc
+    observer.lat = math.radians(lat)
+    observer.lon = math.radians(lon)
+    
+    lst = math.degrees(observer.sidereal_time())
+    eps = math.degrees(ephem.Ecliptic(ephem.Equatorial('0', '0', epoch=observer.date)).ecl)
+    
+    lst_rad = math.radians(lst)
+    lat_rad = math.radians(lat)
+    eps_rad = math.radians(eps)
+    
+    y = -math.cos(lst_rad)
+    x = math.sin(lst_rad) * math.cos(eps_rad) + math.tan(lat_rad) * math.sin(eps_rad)
+    asc_deg = math.degrees(math.atan2(y, x)) % 360
+    
+    return get_zodiac_position_from_deg(asc_deg)
+
+def get_zodiac_position_from_deg(raw_deg):
+    sign_num = int(raw_deg // 30)
+    deg_in_sign = raw_deg % 30
+    return {
+        "sign": ZODIAC_SIGNS[sign_num],
+        "degree": int(deg_in_sign),
+        "minute": int((deg_in_sign - int(deg_in_sign)) * 60),
+        "raw_deg": raw_deg
     }
 
 def calculate_chart(dt_utc, lat, lon):
-    jd = get_julian_day(dt_utc)
+    observer = ephem.Observer()
+    observer.date = dt_utc
+    observer.lat = str(lat)
+    observer.lon = str(lon)
+    
+    bodies = {
+        "Sol": ephem.Sun(observer),
+        "Luna": ephem.Moon(observer),
+        "Mercurio": ephem.Mercury(observer),
+        "Venus": ephem.Venus(observer),
+        "Marte": ephem.Mars(observer),
+        "Júpiter": ephem.Jupiter(observer),
+        "Saturno": ephem.Saturn(observer),
+        "Urano": ephem.Uranus(observer),
+        "Neptuno": ephem.Neptune(observer),
+        "Plutón": ephem.Pluto(observer)
+    }
+    
     positions = {}
-    for p_id, p_name in PLANETS.items():
-        res, _ = swe.calc_ut(jd, p_id)
-        positions[p_name] = get_zodiac_position(res[0])
-        positions[p_name]["speed"] = res[3]
-    cusps, ascmc = swe.houses(jd, lat, lon, b'P')
-    positions["Ascendente"] = get_zodiac_position(ascmc[0])
+    for name, body in bodies.items():
+        positions[name] = get_zodiac_position(body)
+        
+    positions["Ascendente"] = calculate_ascendant(dt_utc, lat, lon)
     return positions
 
 def get_element(sign_name):
@@ -140,7 +169,7 @@ query_date = st.sidebar.date_input("Fecha de Consulta", datetime.date.today())
 query_time = st.sidebar.time_input("Hora de Consulta", datetime.datetime.now().time())
 
 if st.sidebar.button("Calcular Carta y Tránsitos"):
-    geolocator = Nominatim(user_agent="astro_app_cloud")
+    geolocator = Nominatim(user_agent="astro_app_cloud_ephem")
     location = geolocator.geocode(city_name)
     if location:
         lat, lon = location.latitude, location.longitude
