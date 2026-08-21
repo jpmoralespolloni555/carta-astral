@@ -1,11 +1,10 @@
-import datetime
+import datetimeimport datetime
 import math
+import ephem
 import streamlit as st
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 import pytz
-
-from kerykeion import AstrologicalSubject, KerykeionChartSVG
 
 ZODIAC_SIGNS = [
     "Aries", "Tauro", "Géminis", "Cáncer", "Leo", "Virgo",
@@ -77,51 +76,68 @@ NUMEROLOGY_MEANINGS = {
     22: "Construcción a gran escala, materialización de visiones y maestría práctica."
 }
 
-# --- CÁLCULOS CON KERYKEION ---
+# --- CÁLCULOS ASTRONÓMICOS (EPHEM) ---
 
-def get_kery_data(name, dt, lat, lon, tz_str):
-    subject = AstrologicalSubject(
-        name=name,
-        year=dt.year,
-        month=dt.month,
-        day=dt.day,
-        hour=dt.hour,
-        minute=dt.minute,
-        lng=lon,
-        lat=lat,
-        tz_str=tz_str
-    )
+def get_zodiac_position_from_deg(raw_deg):
+    raw_deg = raw_deg % 360
+    sign_num = int(raw_deg // 30)
+    deg_in_sign = raw_deg % 30
+    return {
+        "sign": ZODIAC_SIGNS[sign_num],
+        "degree": int(deg_in_sign),
+        "minute": int((deg_in_sign - int(deg_in_sign)) * 60),
+        "raw_deg": raw_deg
+    }
+
+def get_zodiac_position(equatorial_body):
+    ecl = ephem.Ecliptic(equatorial_body)
+    raw_deg = math.degrees(ecl.lon) % 360
+    return get_zodiac_position_from_deg(raw_deg)
+
+def calculate_correct_ascendant(dt_utc, lat, lon):
+    """Cálculo trigonométrico corregido del Ascendente astronómico oriental."""
+    observer = ephem.Observer()
+    observer.date = dt_utc
+    observer.lat = math.radians(lat)
+    observer.lon = math.radians(lon)
     
-    planets_map = {
-        "Sol": subject.sun,
-        "Luna": subject.moon,
-        "Mercurio": subject.mercury,
-        "Venus": subject.venus,
-        "Marte": subject.mars,
-        "Júpiter": subject.jupiter,
-        "Saturno": subject.saturn,
-        "Urano": subject.uranus,
-        "Neptuno": subject.neptune,
-        "Plutón": subject.pluto
+    lst = float(observer.sidereal_time())
+    
+    julian_days = float(ephem.julian_date(dt_utc)) - 2451545.0
+    eps_deg = 23.4392911 - (0.0000004 * julian_days)
+    eps = math.radians(eps_deg)
+    
+    # Trigonometría esférica para la cúspide oriental
+    y = math.cos(lst)
+    x = -math.sin(lst) * math.cos(eps) - math.tan(observer.lat) * math.sin(eps)
+    
+    asc_deg = (math.degrees(math.atan2(y, x)) + 180) % 360
+    return get_zodiac_position_from_deg(asc_deg)
+
+def calculate_chart(dt_utc, lat, lon):
+    observer = ephem.Observer()
+    observer.date = dt_utc
+    observer.lat = str(lat)
+    observer.lon = str(lon)
+    
+    bodies = {
+        "Sol": ephem.Sun(observer),
+        "Luna": ephem.Moon(observer),
+        "Mercurio": ephem.Mercury(observer),
+        "Venus": ephem.Venus(observer),
+        "Marte": ephem.Mars(observer),
+        "Júpiter": ephem.Jupiter(observer),
+        "Saturno": ephem.Saturn(observer),
+        "Urano": ephem.Uranus(observer),
+        "Neptuno": ephem.Neptune(observer),
+        "Plutón": ephem.Pluto(observer)
     }
     
     positions = {}
-    for p_name, p_obj in planets_map.items():
-        positions[p_name] = {
-            "sign": p_obj["sign"],
-            "degree": int(p_obj["position"]),
-            "minute": int((p_obj["position"] - int(p_obj["position"])) * 60),
-            "raw_deg": p_obj["abs_pos"]
-        }
+    for name, body in bodies.items():
+        positions[name] = get_zodiac_position(body)
         
-    asc_obj = subject.first_house
-    positions["Ascendente"] = {
-        "sign": asc_obj["sign"],
-        "degree": int(asc_obj["position"]),
-        "minute": int((asc_obj["position"] - int(asc_obj["position"])) * 60),
-        "raw_deg": asc_obj["abs_pos"]
-    }
-    
+    positions["Ascendente"] = calculate_correct_ascendant(dt_utc, lat, lon)
     return positions
 
 def get_element(sign_name):
@@ -210,7 +226,7 @@ birth_time = st.sidebar.time_input("Hora exacta de nacimiento", datetime.time(14
 city_name = st.sidebar.text_input("Ciudad y País de Nacimiento", "Santiago, Chile")
 
 tf = TimezoneFinder()
-geolocator = Nominatim(user_agent="astro_kery_app")
+geolocator = Nominatim(user_agent="astro_ephem_app_v4")
 loc_default = geolocator.geocode(city_name)
 
 if loc_default:
@@ -231,11 +247,11 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         tz_str = tf.timezone_at(lat=lat, lng=lon)
         local_tz = pytz.timezone(tz_str)
         
-        dt_birth = datetime.datetime.combine(birth_date, birth_time)
-        dt_query = datetime.datetime.combine(query_date, query_time)
+        utc_birth = local_tz.localize(datetime.datetime.combine(birth_date, birth_time)).astimezone(pytz.utc)
+        utc_query = local_tz.localize(datetime.datetime.combine(query_date, query_time)).astimezone(pytz.utc)
         
-        natal_chart = get_kery_data("Natal", dt_birth, lat, lon, tz_str)
-        transit_chart = get_kery_data("Tránsito", dt_query, lat, lon, tz_str)
+        natal_chart = calculate_chart(utc_birth, lat, lon)
+        transit_chart = calculate_chart(utc_query, lat, lon)
         
         aspects = calculate_aspects(natal_chart, transit_chart)
         life_path = calculate_life_path(birth_date)
@@ -244,7 +260,7 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         synthesis_text, guidance_text = generate_daily_synthesis(natal_chart, transit_chart, aspects, life_path, personal_day)
         rec = calculate_color_recommendation(natal_chart, transit_chart, aspects)
         
-        st.success(f"Ubicación: **{location.address}** | Huso Horario Local: **{tz_str}**")
+        st.success(f"Ubicación: **{location.address}** | Huso Horario Local: **{tz_str} (UTC{utc_query.strftime('%z')})**")
         
         # --- SECCIÓN 1: ASTROLOGÍA + NUMEROLOGÍA ---
         st.subheader("📜 Sincronía del Día: Astrología & Numerología")
