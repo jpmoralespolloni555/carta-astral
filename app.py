@@ -23,7 +23,7 @@ ASCENDANT_DESCRIPTIONS = {
     "Sagitario": "Tu actitud vital es expansiva, optimista y orientada a la búsqueda de sentido, horizontes amplios y aprendizaje.",
     "Capricornio": "Proyectas estructura, pragmatismo y disciplina. Abordas tus metas con sobriedad y foco en la maestría a largo plazo.",
     "Acuario": "Tu visión es original, independiente y enfocada en la innovación. Aportas una perspectiva diferenciada a lo colectivo.",
-    "Piscis": "Proyectas sensibilidad, empatía y apertura simbólica. Tu conexión con el entorno se da a través de la percepción sutil."
+    "Piscis": "Proyectas sensibilidad, empatía y apertura symbolic. Tu conexión con el entorno se da a través de la percepción sutil."
 }
 
 ELEMENT_COLORS = {
@@ -49,18 +49,15 @@ PLANET_COLORS = {
 # --- CÁLCULOS NUMEROLÓGICOS ---
 
 def reduce_number(n):
-    """Reduce un número a un solo dígito (manteniendo números maestros 11 y 22 si aplica)."""
     while n > 9 and n not in [11, 22]:
         n = sum(int(digit) for digit in str(n))
     return n
 
 def calculate_life_path(date_obj):
-    """Calcula el Número de Camino de Vida natal."""
     total = date_obj.day + date_obj.month + sum(int(d) for d in str(date_obj.year))
     return reduce_number(total)
 
 def calculate_personal_day(birth_date, query_date):
-    """Calcula el Número del Día Personal para la fecha de consulta."""
     day_month_birth = reduce_number(birth_date.day + birth_date.month)
     universal_day = reduce_number(query_date.day + query_date.month + sum(int(d) for d in str(query_date.year)))
     return reduce_number(day_month_birth + universal_day)
@@ -79,7 +76,7 @@ NUMEROLOGY_MEANINGS = {
     22: "Construcción a gran escala, materialización de visiones y maestría práctica."
 }
 
-# --- CÁLCULOS ASTRONÓMICOS ---
+# --- CÁLCULOS ASTRONÓMICOS DE PRECISIÓN ---
 
 def get_zodiac_position_from_deg(raw_deg):
     raw_deg = raw_deg % 360
@@ -97,22 +94,26 @@ def get_zodiac_position(equatorial_body):
     raw_deg = math.degrees(ecl.lon) % 360
     return get_zodiac_position_from_deg(raw_deg)
 
-def calculate_ascendant(dt_utc, lat, lon):
+def calculate_exact_ascendant(dt_utc, lat, lon):
+    """Cálculo riguroso del Ascendente astronómico en coordenadas ecuatoriales/eclípticas."""
     observer = ephem.Observer()
     observer.date = dt_utc
     observer.lat = math.radians(lat)
     observer.lon = math.radians(lon)
     
-    lst_deg = math.degrees(observer.sidereal_time())
-    eps_deg = 23.4392911
+    # Tiempo Sideral Local
+    lst = observer.sidereal_time()
     
-    lst_rad = math.radians(lst_deg)
-    lat_rad = math.radians(lat)
-    eps_rad = math.radians(eps_deg)
+    # Oblicuidad real de la eclíptica para la época actual
+    ecl = ephem.Ecliptic(ephem.Equatorial('0', '0', epoch=observer.date))
+    eps = ecl.ecl
     
-    y = -math.cos(lst_rad)
-    x = math.sin(lst_rad) * math.cos(eps_rad) + math.tan(lat_rad) * math.sin(eps_rad)
-    asc_deg = math.degrees(math.atan2(y, x)) % 360
+    # Trigonometría esférica para la intersección de la eclíptica con el horizonte este
+    y = -math.cos(lst)
+    x = math.sin(lst) * math.cos(eps) + math.tan(observer.lat) * math.sin(eps)
+    
+    asc_rad = math.atan2(y, x)
+    asc_deg = math.degrees(asc_rad) % 360
     
     return get_zodiac_position_from_deg(asc_deg)
 
@@ -139,7 +140,7 @@ def calculate_chart(dt_utc, lat, lon):
     for name, body in bodies.items():
         positions[name] = get_zodiac_position(body)
         
-    positions["Ascendente"] = calculate_ascendant(dt_utc, lat, lon)
+    positions["Ascendente"] = calculate_exact_ascendant(dt_utc, lat, lon)
     return positions
 
 def get_element(sign_name):
@@ -225,18 +226,29 @@ birth_date = st.sidebar.date_input("Fecha de nacimiento", datetime.date(1992, 5,
 birth_time = st.sidebar.time_input("Hora exacta de nacimiento", datetime.time(14, 30))
 city_name = st.sidebar.text_input("Ciudad y País de Nacimiento", "Santiago, Chile")
 
+# Resolución de Zona Horaria Local para la Hora Actual de Consulta
+tf = TimezoneFinder()
+geolocator = Nominatim(user_agent="astro_num_app_tz")
+loc_default = geolocator.geocode(city_name)
+
+if loc_default:
+    tz_name = tf.timezone_at(lat=loc_default.latitude, lng=loc_default.longitude)
+    tz_obj = pytz.timezone(tz_name)
+    now_local = datetime.datetime.now(tz_obj)
+else:
+    now_local = datetime.datetime.now()
+
 st.sidebar.header("2. Consulta de Tránsitos")
-query_date = st.sidebar.date_input("Fecha de Consulta", datetime.date.today())
-query_time = st.sidebar.time_input("Hora de Consulta", datetime.datetime.now().time())
+query_date = st.sidebar.date_input("Fecha de Consulta", now_local.date())
+query_time = st.sidebar.time_input("Hora de Consulta (Auto-detectada Local)", now_local.time())
 
 if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
-    geolocator = Nominatim(user_agent="astro_num_app_cloud")
     location = geolocator.geocode(city_name)
     if location:
         lat, lon = location.latitude, location.longitude
-        tf = TimezoneFinder()
         tz_str = tf.timezone_at(lat=lat, lng=lon)
         local_tz = pytz.timezone(tz_str)
+        
         utc_birth = local_tz.localize(datetime.datetime.combine(birth_date, birth_time)).astimezone(pytz.utc)
         utc_query = local_tz.localize(datetime.datetime.combine(query_date, query_time)).astimezone(pytz.utc)
         
@@ -250,7 +262,7 @@ if st.sidebar.button("Calcular Carta, Tránsitos y Numerología"):
         synthesis_text, guidance_text = generate_daily_synthesis(natal_chart, transit_chart, aspects, life_path, personal_day)
         rec = calculate_color_recommendation(natal_chart, transit_chart, aspects)
         
-        st.success(f"Ubicación: **{location.address}** | Huso Horario: **{tz_str}**")
+        st.success(f"Ubicación: **{location.address}** | Huso Horario Local: **{tz_str} (UTC{utc_query.strftime('%z')})**")
         
         # --- SECCIÓN 1: VÍNCULO ASTROLOGÍA + NUMEROLOGÍA + GUÍA DEL DÍA ---
         st.subheader("📜 Sincronía del Día: Astrología & Numerología")
